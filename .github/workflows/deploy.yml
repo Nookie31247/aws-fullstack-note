@@ -8,8 +8,8 @@ on:
 env:
   AWS_REGION: ap-northeast-2
   S3_BUCKET: fullstack-deploy-${{ secrets.AWS_ACCOUNT_ID }}
-  FRONTEND_ASG: fullstack-asg-fe
-  BACKEND_ASG: fullstack-asg-be
+  FRONTEND_ASG: fullstack-frontend-asg
+  BACKEND_ASG: fullstack-backend-asg
 
 jobs:
   # ── Job 1: Spring Boot JAR 빌드 ──────────────────────
