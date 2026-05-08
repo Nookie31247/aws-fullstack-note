@@ -1,0 +1,190 @@
+name: Full-Stack Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-northeast-2
+  S3_BUCKET: fullstack-deploy-${{ secrets.AWS_ACCOUNT_ID }}
+  FRONTEND_ASG: fullstack-asg-fe
+  BACKEND_ASG: fullstack-asg-be
+
+jobs:
+  # ── Job 1: Spring Boot JAR 빌드 ──────────────────────
+  build-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { java-version: '17', distribution: 'temurin', cache: gradle }
+      - name: Test & Build
+        run: |
+          chmod +x gradlew
+          ./gradlew test bootJar --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: backend-jar, path: backend/build/libs/note-app.jar }
+
+  # ── Job 2: Next.js 빌드 ───────────────────────────────
+  build-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm',
+                cache-dependency-path: frontend/package-lock.json }
+      - name: Install & Build
+        env:
+          NEXT_PUBLIC_API_URL: http://${{ secrets.FE_ALB_DNS }}
+        run: |
+          npm ci
+          npm run build
+      - name: Prepare Arifact
+        run: |
+          mkdir -p frontend
+          cp -r .next ./frontend/
+          cp -r public ./frontend/ 2>/dev/null || true
+          cp package.json package-lock.json next.config.ts ./frontend/ 2>/dev/null || true
+          cd ./frontend
+          zip -r ../frontend.zip .next/ public/ package.json package-lock.json next.config.ts
+          ls -l .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/frontend.zip
+
+
+  # ── Job 3: S3 업로드 (빌드 결과물) ──────────────────
+  upload-to-s3:
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+      - uses: actions/download-artifact@v4
+        with: { name: backend-jar, path: ./artifacts/backend }
+      - uses: actions/download-artifact@v4
+        with: { name: frontend-build, path: ./artifacts/frontend }
+      - name: Upload
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          # 백엔드
+          aws s3 cp ./artifacts/backend/note-app.jar \
+            s3://${S3_BUCKET}/backend/note-app-${SHORT_SHA}.jar
+          aws s3 cp ./artifacts/backend/note-app.jar \
+            s3://${S3_BUCKET}/backend/note-app-latest.jar
+          # 프론트엔드
+          aws s3 cp ./artifacts/frontend/frontend.zip \
+            s3://${S3_BUCKET}/frontend/frontend-${SHORT_SHA}.zip
+          aws s3 cp ./artifacts/frontend/frontend.zip \
+            s3://${S3_BUCKET}/frontend/frontend-latest.zip
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+
+  # ── Job 4-A: 백엔드 SSM 배포 ─────────────────────────
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: upload-to-s3
+    steps:
+      -   uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: ${{ env.AWS_REGION }}
+      -   name: SSM Rolling Deploy
+          run: |
+            IDS=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names ${BACKEND_ASG} \
+              --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+              --output text | tr '\t' ' ')
+            COMMANDS_JSON=$(cat <<EOF
+            {
+              "commands": [
+                "aws s3 cp s3://${S3_BUCKET}/backend/note-app-latest.jar /opt/app/note-app.jar --region ap-northeast-2",
+                "systemctl restart note-app",
+                "sleep 15",
+                "STATUS=\$(curl -sf -o /dev/null -w \"%{http_code}\" http://localhost:8080/actuator/health)",
+                "[ \"\$STATUS\" = \"200\" ] && echo OK || (echo FAIL && exit 1)"
+              ]
+            }
+            EOF
+            )
+            
+            for IID in $IDS; do
+              CMD=$(aws ssm send-command --instance-ids $IID \
+                --document-name AWS-RunShellScript \
+                --parameters "$COMMANDS_JSON" \
+                --timeout-seconds 300 \
+                --query Command.CommandId --output text)
+              for i in $(seq 1 30); do sleep 10
+                ST=$(aws ssm get-command-invocation \
+                  --command-id $CMD --instance-id $IID \
+                  --query Status --output text 2>/dev/null || echo Pending)
+                [ "$ST" = Success ] && break
+                [ "$ST" = Failed ] && exit 1
+              done
+              echo "✅ $IID 배포 완료"
+            done
+
+  # ── Job 4-B: 프론트엔드 SSM 배포 ─────────────────────
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: upload-to-s3
+    steps:
+      -   uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: ${{ env.AWS_REGION }}
+      -   name: SSM Rolling Deploy
+          run: |
+            IDS=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names ${FRONTEND_ASG} \
+              --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+              --output text | tr '\t' ' ')
+            COMMANDS_JSON=$(cat <<EOF
+            {
+              "commands": [
+                "aws s3 cp s3://${S3_BUCKET}/frontend/frontend-latest.zip /tmp/fe.zip --region ap-northeast-2",
+                "unzip -o /tmp/fe.zip -d /tmp/fe-new",
+                "sudo -u ubuntu pm2 stop note-frontend 2>/dev/null || true",
+                "rm -rf /opt/frontend/.next /opt/frontend/public",
+                "cp -r /tmp/fe-new/.next /opt/frontend/",
+                "cp -r /tmp/fe-new/public /opt/frontend/ 2>/dev/null || true",
+                "cp /tmp/fe-new/package.json /opt/frontend/",
+                "cd /opt/frontend && npm install --production",
+                "chown -R ubuntu:ubuntu /opt/frontend",
+                "sudo -u ubuntu pm2 start npm --name note-frontend -- start",
+                "sudo -u ubuntu pm2 save",
+                "sleep 5",
+                "STATUS=\$(curl -sf -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+                "[ \"\$STATUS\" = \"200\" ] && echo OK || (echo FAIL && exit 1)",
+                "rm -rf /tmp/fe.zip /tmp/fe-new"
+              ]
+            }
+            EOF
+            )
+            for IID in $IDS; do
+              CMD=$(aws ssm send-command --instance-ids $IID \
+                --document-name AWS-RunShellScript \
+                --parameters "$COMMANDS_JSON"\
+                --timeout-seconds 360 \
+                --query Command.CommandId --output text)
+              for i in $(seq 1 36); do sleep 10
+                ST=$(aws ssm get-command-invocation \
+                  --command-id $CMD --instance-id $IID \
+                  --query Status --output text 2>/dev/null || echo Pending)
+                [ "$ST" = Success ] && break
+                [ "$ST" = Failed ] && exit 1
+              done
+              echo "✅ $IID 배포 완료"
+            done

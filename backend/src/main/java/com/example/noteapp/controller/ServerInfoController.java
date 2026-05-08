@@ -36,13 +36,4 @@ public class ServerInfoController {
 
         return ResponseEntity.ok(result);
     }
-
-    /**
-     * 로드밸런스 health 체크
-     * 정상 작동 시 200 OK 반환
-     */
-    @GetMapping("/actuator/health")
-    public ResponseEntity<Void> healthCheck() {
-        return ResponseEntity.ok().build();
-    }
 }

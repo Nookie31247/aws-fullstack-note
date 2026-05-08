@@ -4,7 +4,7 @@
 
 import { Note, NoteRequest, ServerInfo } from '@/types/note'
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
+const BASE_URL = ''
 
 // ── 공통 fetch 래퍼 ──────────────────────────────────────────
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
