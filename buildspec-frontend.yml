@@ -20,8 +20,7 @@ phases:
             - cp frontend/package-lock.json deploy-frontend/
             - cp frontend/Procfile deploy-frontend/
             - '[ -f frontend/next.config.ts ] && cp frontend/next.config.ts deployfrontend/ || true'
-            - '[ -d frontend/public ] && cp -r frontend/public deploy-frontend/ ||
-            - true'
+            - '[ -d frontend/public ] && cp -r frontend/public deploy-frontend/ || true'
             - '[ -d frontend/.ebextensions ] && cp -r frontend/.ebextensions deployfrontend/ || true'
 artifacts:
     files:
