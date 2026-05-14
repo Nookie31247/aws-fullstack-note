@@ -1,5 +1,9 @@
 version: 0.2
 
+env:
+variables:
+    NEXT_PUBLIC_API_URL: [BE_EB_URL]
+
 phases:
     install:
         runtime-versions:
@@ -13,18 +17,18 @@ phases:
             - npm run build
     post_build:
         commands:
+            - cd ..
             - mkdir -p deploy-frontend
-            - cp -r ../frontend/.next deploy-frontend/
-            - cp ../frontend/package.json deploy-frontend/
-            - cp ../frontend/package-lock.json deploy-frontend/
-            - cp ../frontend/Procfile deploy-frontend/
-            - '[ -f ../frontend/next.config.ts ] && cp ../frontend/next.config.ts deploy-frontend/ || true'
-            - '[ -d ../frontend/public ] && cp -r ../frontend/public deploy-frontend/ || true'
-            - '[ -d ../frontend/.ebextensions ] && cp -r ../frontend/.ebextensions deploy-frontend/ || true'
-
+            - cp -r frontend/.next deploy-frontend/
+            - cp frontend/package.json deploy-frontend/
+            - cp frontend/package-lock.json deploy-frontend/
+            - cp frontend/Procfile deploy-frontend/
+            - '[ -f frontend/next.config.ts ] && cp frontend/next.config.ts deployfrontend/ || true'
+            - '[ -d frontend/public ] && cp -r frontend/public deploy-frontend/ ||
+            - true'
+            - '[ -d frontend/.ebextensions ] && cp -r frontend/.ebextensions deployfrontend/ || true'
 artifacts:
     files:
         - '**/*'
     base-directory: deploy-frontend
     discard-paths: no
-
