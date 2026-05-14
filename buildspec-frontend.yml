@@ -1,8 +1,8 @@
 version: 0.2
 
 env:
-variables:
-    NEXT_PUBLIC_API_URL: [BE_EB_URL]
+    variables:
+        NEXT_PUBLIC_API_URL: [BE_EB_URL]
 
 phases:
     install:
