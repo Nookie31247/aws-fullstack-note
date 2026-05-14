@@ -6,11 +6,11 @@ phases:
       java: corretto17
   pre_build:
     commands:
-      - echo "=== start backend build: $(date) ==="
+      - echo `=== start backend build: $(date) ===`
       - java -version
   build:
     commands:
-      - cd backend && chmod +x gradlew && ./gradlew bootJar -x test
+      - chmod +x ./backend/gradlew && ./backend/gradlew -p ./backend bootJar -x test
   post_build:
     commands:
       - mkdir -p deploy-backend
