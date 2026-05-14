@@ -1,10 +1,10 @@
 version: 0.2
 
 phases:
+  install:
+    runtime-versions:
+      java: corretto17
   pre_build:
-    install:
-      runtime-versions:
-        java: corretto17
     commands:
       - echo "=== start backend build: $(date) ==="
       - java -version
