@@ -1,18 +1,21 @@
 version: 1
-frontend:
-    phases:
-        commands:
+applications:
+  - appRoot: frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
             - node -v
             - npm ci
-    build:
-        commands:
+        build:
+          commands:
             - echo "Building Next.js app..."
             - npm run build
-    artifacts:
+      artifacts:
         baseDirectory: .next
         files:
-            - '**/*'
-    cache:
+          - '**/*'
+      cache:
         paths:
-            - node_modules/**/*
-            - .next/cache/**/*
+          - node_modules/**/*
+          - .next/cache/**/*
